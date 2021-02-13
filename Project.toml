@@ -1,0 +1,7 @@
+name = "SlicedArrays"
+uuid = "e918aab1-85be-4209-a500-7a3e2095d6f2"
+authors = ["Simon Byrne <simonbyrne@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
