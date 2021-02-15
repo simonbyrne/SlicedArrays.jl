@@ -6,7 +6,19 @@ import Base: IteratorSize, size, length, ndims,
     IteratorEltype, eltype,
     iterate, getindex, setindex!, parent
 
-struct SlicedArray{S,N,P,CI,L} <: AbstractArray{S,N}
+
+"""
+
+- `N` is the dimension of the "outer" array
+- `L` is a tuple of length `M=ndims(parent)`, each element denoting how the corresponding dimension is handled:
+  - an integer if it is an outer dimension, being the index of the SlicedArray
+  - `nothing` if it is an "inner" dimension
+
+- `P` is the type of the parent array
+- `CI` is the type of the Cartesian iterator
+- `S` is the element type
+"""
+struct SlicedArray{N,L,P,CI,S} <: AbstractArray{S,N}
     """
     Parent array
     """
@@ -17,6 +29,19 @@ struct SlicedArray{S,N,P,CI,L} <: AbstractArray{S,N}
     cartiter::CI
 end
 
+unitaxis(::AbstractArray) = Base.OneTo(1)
+
+function SlicedArray{N,L}(A::P, iter::CI) where {N,L,P,CI}
+    S = Base._return_type(view, Tuple{P, map((a,l) -> l === nothing ? Colon : eltype(a), axes(A), L)...})
+    SlicedArray{N,L,P,CI,S}(A, iter)
+end
+
+
+# L is a tuple of length `ndims(parent)`, each element denoting how the corresponding dimension is handled:
+#  - an integer if it is an outer dimensions
+#  - nothing if an inner d
+
+
 _sliced_check_dims(N) = nothing
 function _sliced_check_dims(N, dim, dims...)
     1 <= dim <= N || throw(DimensionMismatch("Invalid dimension $dim"))
@@ -24,38 +49,41 @@ function _sliced_check_dims(N, dim, dims...)
     _sliced_check_dims(N,dims...)
 end
 
-
-const _SlicedArray{N,P,CI,L} = SlicedArray{S,N,P,CI,L} where {S}
-function _SlicedArray{N,P,CI,L}(A::P, iter) where {N,P,CI,L}
-    # determine element type
-    S = Base._return_type(view, Tuple{P, map((a,l) -> l === nothing ? Colon : eltype(a), axes(A), L)...})
-    SlicedArray{S,N,P,CI,L}(A,iter)
-end
-
-
-@inline function _eachslice(A::AbstractArray{T,N}, dims::NTuple{M,Integer}) where {T,N,M}
+@inline function _eachslice(A::AbstractArray{T,N}, dims::NTuple{M,Integer}, drop::Bool) where {T,N,M}
     _sliced_check_dims(N,dims...)
-    iter = CartesianIndices(map(dim -> axes(A,dim), dims))
-    L = ntuple(dim -> findfirst(isequal(dim), dims), N)
-    _SlicedArray{M,typeof(A),typeof(iter),L}(A,iter)
+    if drop
+        iter = CartesianIndices(map(dim -> axes(A,dim), dims))
+        L = ntuple(dim -> findfirst(isequal(dim), dims), N)
+        return SlicedArray{M,L}(A, iter)
+    else
+        iter = ntuple(dim -> dim in dims ? axes(A,dim) : unitaxis(A), N)
+        L = ntuple(dim -> dim in dims ? dim : nothing, N)
+        return SlicedArray{N,L}(A, iter)
+    end
 end
-@inline function _eachslice(A::AbstractArray{T,N}, dim::Integer) where {T,N}
-    _eachslice(A, (dim,))
+@inline function _eachslice(A::AbstractArray{T,N}, dim::Integer, drop::Bool) where {T,N}
+    _eachslice(A, (dim,), drop)
 end
 
-@inline eachslice(A; dims) = _eachslice(A, dims)
+@inline function eachslice(A; dims, drop=true)
+    Base.@_inline_meta
+    _eachslice(A, dims, drop)
+end
 
 
-const RowSlicedMatrix = SlicedArray{S,1,P,CI,(1,nothing)} where {S<:AbstractVector,P<:AbstractMatrix,CI}
-const ColSlicedMatrix = SlicedArray{S,1,P,CI,(nothing,1)} where {S<:AbstractVector,P<:AbstractMatrix,CI}
+eachrow(A; drop=true) = _eachslice(A, (1,), drop)
+eachcol(A; drop=true) = _eachslice(A, (2,), drop)
+
+const RowSlicedMatrix = SlicedArray{1,(1,nothing),P,CI,S} where {S<:AbstractVector,P<:AbstractMatrix,CI}
+const ColSlicedMatrix = SlicedArray{1,(nothing,1),P,CI,S} where {S<:AbstractVector,P<:AbstractMatrix,CI}
 
 
-IteratorSize(::Type{SlicedArray{S,N,P,CI,L}}) where {S,N,P,CI,L} = IteratorSize(CI)
+IteratorSize(::Type{SlicedArray{N,L,P,CI,S}}) where {N,L,P,CI,S} = IteratorSize(CI)
 size(s::SlicedArray) = size(s.cartiter)
 size(s::SlicedArray, dim) = size(s.cartiter, dim)
 length(s::SlicedArray) = length(s.cartiter)
 
-@inline function _slice_index(s::SlicedArray{S,N,P,CI,L}, I...) where {S,N,P,CI,L}
+@inline function _slice_index(s::SlicedArray{N,L,P,CI,S}, I...) where {N,L,P,CI,S}
     c = s.cartiter[I...]    
     return map(l -> l === nothing ? (:) : c[l], L)
 end
@@ -69,7 +97,6 @@ function setindex!(s::SlicedArray, val, I...)
 end
 
 parent(s::SlicedArray) = s.arr
-
 
 
 end # module
