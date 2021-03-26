@@ -1,6 +1,6 @@
 module SlicedArrays
 
-export Slices
+export Slices, Rows, Columns
 import Base: getindex, setindex!, axes, size, IteratorSize, parent
 
 include("slicearray.jl")
